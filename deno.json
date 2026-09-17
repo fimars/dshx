@@ -1,4 +1,8 @@
 {
+  "name": "@mzk/dshx",
+  "version": "0.1.0",
+  "license": "MIT",
+  "exports": "./dshx.ts",
   "imports": {
     "@cliffy/prompt": "jsr:@cliffy/prompt@1.2.1"
   },
