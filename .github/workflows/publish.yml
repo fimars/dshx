@@ -1,0 +1,23 @@
+name: Publish
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write # OIDC：用于向 JSR 认证，无需任何 secret
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+
+      # 若 deno.json 中的 version 已发布过，deno publish 会直接跳过，
+      # 因此重复推送 main 是安全的。
+      - run: deno publish

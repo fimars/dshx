@@ -1,0 +1,31 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+
+      - name: 校验依赖锁文件
+        run: deno install --frozen
+
+      - name: 格式
+        run: deno fmt --check
+
+      - name: Lint
+        run: deno lint
+
+      - name: 类型检查
+        run: deno check dshx.ts
+
+      - name: 试发布（不上传，仅校验 JSR 元数据）
+        run: deno publish --dry-run

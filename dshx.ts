@@ -190,7 +190,9 @@ async function pullRepo(
     const detail = r?.stderr.trim().split("\n").at(-1) ??
       (r === null ? "超时或命令不可用" : "");
     console.error(
-      `dshx: ${repo} git pull 失败${detail ? `（${detail}）` : ""}，使用本地已有代码。`,
+      `dshx: ${repo} git pull 失败${
+        detail ? `（${detail}）` : ""
+      }，使用本地已有代码。`,
     );
     return { head: before, updated: false };
   }
