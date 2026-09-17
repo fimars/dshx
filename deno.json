@@ -1,0 +1,9 @@
+{
+  "imports": {
+    "@cliffy/prompt": "jsr:@cliffy/prompt@1.2.1"
+  },
+  "tasks": {
+    "compile": "deno compile --allow-net --allow-run --allow-env --allow-sys --allow-read --allow-write --output bin/dshx dshx.ts",
+    "link": "mkdir -p \"$HOME/.local/bin\" && ln -sf \"$PWD/bin/dshx\" \"$HOME/.local/bin/dshx\""
+  }
+}

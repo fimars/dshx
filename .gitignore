@@ -1,0 +1,49 @@
+# ---- Deno ----
+# 项目级 DENO_DIR（若设置过 DENO_DIR=.deno）
+.deno/
+# deno vendor 产物
+/vendor/
+# deno coverage 输出
+/coverage/
+*.lcov
+# 类型检查增量缓存
+*.tsbuildinfo
+
+# 注意：deno.lock 必须提交，不要加进忽略列表。
+
+# ---- 依赖 ----
+node_modules/
+
+# ---- 本项目的构建产物 ----
+# deno compile --output bin/dshx（内嵌源码的独立可执行文件）
+/bin/
+
+# ---- 编辑器 / IDE ----
+.idea/
+*.iml
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json
+
+# ---- AI 工具的本机个人配置 ----
+.claude/settings.local.json
+.pi/
+
+# ---- macOS ----
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+
+# ---- Windows ----
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# ---- 日志 / 临时文件 ----
+*.log
+npm-debug.log*
+pnpm-debug.log*
+/tmp/
+*.swp
+*~
