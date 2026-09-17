@@ -1,8 +1,14 @@
 # dshx
 
 DeepSeek Harness CLI 启动器：记住来源，启动 `dsh web`；状态在 `~/.dshx`。
+仓库：<https://github.com/fimars/dshx>
+
+## Install
 
     deno install -g -n dshx --allow-net --allow-run --allow-env --allow-sys --allow-read --allow-write jsr:@mzk/dshx
+
+## Usage
+
     dshx                            # 启动，参数原样透传（不要再写 web，会变成 dsh web web）
     dshx use default                # 切官方 npm 版（别名 npm / official）
     dshx use <owner>/<repo>         # 切 GitHub 源码版（自动 clone / pull / build）
