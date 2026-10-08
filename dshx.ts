@@ -529,7 +529,7 @@ function printUsage(): void {
   dshx                     按上次记录的来源启动 dsh web（透传参数）
   dshx use default         切换为官方 npm 版 (@deepseek-ai/dsh)
   dshx use <owner>/<repo>  切换为 GitHub 源码版（如 shiguredo/deepseek-harness），
-                           repo 管理在 ~/.dshx/repos/，每次启动前自动 pull
+                           repo 管理在 ~/.dshx/repos/，每次启动前对齐上游 HEAD
   dshx use                 查看当前来源与已管理 repo`);
 }
 
