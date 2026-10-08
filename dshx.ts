@@ -11,9 +11,9 @@
  *
  * 启动逻辑：
  *   - default (npm)：本地版本 vs registry 最新版本，有更新时提示，随后 `dsh web ...`
- *   - github (源码)：每次启动前 fetch 上游并快进；上游重写了历史（amend / force-push）
- *     导致无法快进时，工作区没有未提交改动就直接对齐上游。HEAD 有变化（或从未构建）时
- *     执行 `pnpm install && pnpm run clean && pnpm run build`，然后 `pnpm dsh web ...`；
+ *   - github (源码)：每次启动前只取上游最新提交并对其快照，检出始终等于上游 HEAD；
+ *     本地有未提交改动或本地提交时不覆盖。HEAD 有变化（或从未构建）时执行
+ *     `pnpm install && pnpm run clean && pnpm run build`，然后 `pnpm dsh web ...`；
  *     同步失败仅警告，不阻塞启动（下次启动再试）。
  *
  * 状态：
@@ -154,15 +154,18 @@ async function gitOk(dir: string, args: string[]): Promise<boolean> {
   return r?.code === 0;
 }
 
-async function gitShortRev(
-  dir: string,
-  rev = "HEAD",
-): Promise<string | null> {
-  const r = await capture("git", ["rev-parse", "--short", rev], {
+/** 取引用的完整提交号；失败返回 null。 */
+async function gitRev(dir: string, rev = "HEAD"): Promise<string | null> {
+  const r = await capture("git", ["rev-parse", rev], {
     cwd: dir,
     timeoutMs: 10_000,
   });
   return r?.code === 0 ? r.stdout.trim() || null : null;
+}
+
+/** 对外显示的提交号：固定 10 位，不受 git 缩写长度随仓库大小变化的影响。 */
+function shortRev(sha: string): string {
+  return sha.slice(0, 10);
 }
 
 /** 确保repo 已克隆到 ~/.dshx/repos/，返回本地路径。失败直接退出。 */
@@ -194,7 +197,7 @@ async function ensureRepo(repo: string): Promise<string> {
 
 type SyncOutcome =
   | { status: "current"; head: string | null }
-  | { status: "updated"; head: string | null; resynced: boolean }
+  | { status: "updated"; head: string | null }
   | { status: "failed"; head: string | null; reason: string };
 
 /** 上游引用名（如 origin/shiguredo）；未配置上游时回退 origin/HEAD。 */
@@ -208,16 +211,33 @@ async function upstreamRef(dir: string): Promise<string> {
   return ref === "" || ref === "@{u}" ? "origin/HEAD" : ref;
 }
 
-/** 同步上游最新代码，返回结果供调用方如实报告。 */
+/** 检出里是否已有上游 tip 之外的历史（例如本机自己提交过）。 */
+async function hasLocalHistory(dir: string): Promise<boolean> {
+  const r = await capture(
+    "git",
+    ["rev-parse", "--verify", "--quiet", "HEAD^"],
+    {
+      cwd: dir,
+      timeoutMs: 10_000,
+    },
+  );
+  return r === null || r.code === 0;
+}
+
+/**
+ * 同步上游最新代码，把检出保持成“只有上游 HEAD 这一份快照”。
+ *
+ * 检出是 dshx 的构建缓存，不需要历史，也不当工作副本用：只按 --depth 1 取最新
+ * 那一个提交再对齐。这样上游 amend / force-push 也只是换了一个提交，不会像快进那样
+ * 卡在“无关历史”上，.git 也不会随着时间膨大。
+ */
 async function syncRepo(dir: string): Promise<SyncOutcome> {
-  const before = await gitShortRev(dir);
+  const before = await gitRev(dir);
   if (before === null) {
     return { status: "failed", head: null, reason: "不是 git 仓库" };
   }
 
-  // 普通 fetch（不带 --depth）会沿本地已有的 shallow 边界补足到上游最新，
-  // 只传输增量且保持快进能力；--depth 1 反而会把新提交记成孤立根，永远无法快进。
-  const fetch = await capture("git", ["fetch", "origin"], {
+  const fetch = await capture("git", ["fetch", "--depth", "1", "origin"], {
     cwd: dir,
     timeoutMs: GIT_TIMEOUT_MS,
   });
@@ -230,24 +250,14 @@ async function syncRepo(dir: string): Promise<SyncOutcome> {
   }
 
   const target = await upstreamRef(dir);
-  const tip = await gitShortRev(dir, target);
+  const tip = await gitRev(dir, target);
   if (tip === null) {
     return { status: "failed", head: before, reason: `无法解析上游 ${target}` };
   }
   if (tip === before) return { status: "current", head: before };
 
-  // 快进成功且 HEAD 真的移动了才是更新；HEAD 未动说明本地本来就包含上游最新提交
-  // （例如本地多一个提交），不用也不该动工作区。
-  if (await gitOk(dir, ["merge", "--ff-only", target])) {
-    const head = (await gitShortRev(dir)) ?? before;
-    return head === before
-      ? { status: "current", head: before }
-      : { status: "updated", head, resynced: false };
-  }
-
-  // 无法快进：上游重写了历史，或者本地基于旧提交另有提交。dshx 的检出只用于构建，
-  // 没有值得保留的本地提交，所以没有改动过的跟踪文件就直接对齐上游；有则原样保留。
-  // 只看跟踪文件：构建产物（node_modules、lib 等）本来就是 dshx 自己产生的。
+  // 对齐会丢掉本地东西，先把不能丢的情况拦下来：未提交的跟踪文件改动、本地提交。
+  // 只看跟踪文件，构建产物（node_modules、lib 等）本来就是 dshx 自己产生的。
   const modified = await capture(
     "git",
     ["status", "--porcelain", "--untracked-files=no"],
@@ -257,13 +267,28 @@ async function syncRepo(dir: string): Promise<SyncOutcome> {
     return {
       status: "failed",
       head: before,
-      reason: `无法快进，且 ${dir} 有未提交改动，未同步`,
+      reason: `有未提交改动，未覆盖 ${dir}`,
     };
   }
+  if (await hasLocalHistory(dir)) {
+    return {
+      status: "failed",
+      head: before,
+      reason: `本地已有提交，未覆盖 ${dir}`,
+    };
+  }
+
   if (!await gitOk(dir, ["reset", "--hard", target])) {
     return { status: "failed", head: before, reason: `对齐 ${target} 失败` };
   }
-  return { status: "updated", head: tip, resynced: true };
+  await pruneOldSnapshot(dir);
+  return { status: "updated", head: tip };
+}
+
+/** 丢掉被替换掉的那份快照，让 .git 只留下当前 HEAD 的字节。 */
+async function pruneOldSnapshot(dir: string): Promise<void> {
+  await gitOk(dir, ["reflog", "expire", "--expire=now", "--all"]);
+  await gitOk(dir, ["gc", "--prune=now", "--quiet"]);
 }
 
 /** HEAD 变化或从未构建时，执行 pnpm install + pnpm run build。 */
@@ -275,7 +300,12 @@ async function ensureBuilt(dir: string, head: string | null): Promise<void> {
   } catch {
     // 未构建
   }
-  if (head !== null && builtAt === head) return;
+  if (head !== null && builtAt !== null) {
+    // 标记里是完整提交号；旧版本存的是缩写，前缀匹配也算已构建。
+    if (builtAt === head || (builtAt.length >= 7 && head.startsWith(builtAt))) {
+      return;
+    }
+  }
 
   console.error("dshx: 需要构建（首次使用或代码有更新）→ pnpm install …");
   if (!(await run("pnpm", ["install"], { cwd: dir }))) {
@@ -400,19 +430,17 @@ async function launchRepo(repo: string, args: string[]): Promise<never> {
   const sync = await syncRepo(dir);
   switch (sync.status) {
     case "current":
-      if (sync.head) console.error(`dshx: ${repo} @ ${sync.head}（已是最新）`);
+      if (sync.head) {
+        console.error(`dshx: ${repo} @ ${shortRev(sync.head)}（已是最新）`);
+      }
       break;
     case "updated":
-      console.error(
-        `dshx: ${repo} ${
-          sync.resynced ? "无法快进，已重新对齐到" : "已更新到"
-        } ${sync.head}。`,
-      );
+      console.error(`dshx: ${repo} 已更新到 ${shortRev(sync.head ?? "")}。`);
       break;
     case "failed":
       console.error(
         `dshx: ${repo} 同步失败（${sync.reason}），继续使用本地已有代码${
-          sync.head ? ` @ ${sync.head}` : ""
+          sync.head ? ` @ ${shortRev(sync.head)}` : ""
         }。`,
       );
       break;
@@ -478,8 +506,8 @@ async function showStatus(): Promise<void> {
       for await (const name of Deno.readDir(join(REPOS_DIR, owner.name))) {
         if (!name.isDirectory) continue;
         const repo = `${owner.name}/${name.name}`;
-        const head = await gitShortRev(repoPath(repo));
-        entries.push(`  - ${repo}${head ? ` @ ${head}` : ""}`);
+        const head = await gitRev(repoPath(repo));
+        entries.push(`  - ${repo}${head ? ` @ ${shortRev(head)}` : ""}`);
       }
     }
   } catch {
